@@ -188,3 +188,98 @@ extern "C" {
     pub fn mdb_reader_list(env: *mut MDB_env, func: *const MDB_msg_func, ctx: *mut c_void) -> c_int;
     pub fn mdb_reader_check(env: *mut MDB_env, dead: *mut c_int) -> c_int;
 }
+
+#[cfg(test)]
+mod test {
+    extern crate libc;
+
+    use super::*;
+    use std;
+    use libc::types::os::arch::c95::size_t;
+    use libc::{c_void};
+
+    fn into_raw(slice: &[u8]) -> *const libc::c_char {
+        slice.as_ptr() as *const libc::c_char
+    }
+
+    macro_rules! check {
+        ($cond:expr) => {{
+            let res = $cond;
+            if res != 0 {
+                panic!(concat!("function failed with result {}: ", stringify!($cond)), res)
+            }
+        }};
+    }
+
+    #[test]
+    fn create_env() {
+        let mut env : *mut MDB_env = std::ptr::null_mut();
+        unsafe {
+            check!(mdb_env_create(&mut env));
+        };
+    }
+
+    #[test]
+    fn env_open() {
+        let mut env : *mut MDB_env = std::ptr::null_mut();
+        unsafe {
+            check!(mdb_env_create(&mut env));
+            std::fs::remove_dir_all("env_open_test.lmdb").ok();
+            std::fs::create_dir("env_open_test.lmdb").unwrap();
+            check!(mdb_env_open(env, into_raw(b"env_open_test.lmdb\0"), 0, 0o666));
+            mdb_env_close(env);
+        };
+    }
+
+    #[test]
+    fn txn_begin() {
+        let mut env : *mut MDB_env = std::ptr::null_mut();
+        let mut txn : *mut MDB_txn = std::ptr::null_mut();
+        unsafe {
+            check!(mdb_env_create(&mut env));
+            std::fs::remove_dir_all("txn_begin_test.lmdb").ok();
+            std::fs::create_dir("txn_begin_test.lmdb").unwrap();
+            check!(mdb_env_open(env, into_raw(b"txn_begin_test.lmdb\0"), 0, 0o666));
+            check!(mdb_txn_begin(env, std::ptr::null_mut(), 0, &mut txn));
+            check!(mdb_txn_commit(txn));
+            mdb_env_close(env);
+        }
+    }
+
+    #[test]
+    fn txn_put_get() {
+        let mut env : *mut MDB_env = std::ptr::null_mut();
+        let mut txn : *mut MDB_txn = std::ptr::null_mut();
+        let mut dbi : MDB_dbi = 0;
+        let mut key : MDB_val = MDB_val {
+            mv_size: b"test_key".len() as size_t,
+            mv_data: into_raw(b"test_key") as *mut c_void
+        };
+        let mut data : MDB_val = MDB_val {
+            mv_size: b"test_data".len() as size_t,
+            mv_data: into_raw(b"test_data") as *mut c_void
+        };
+        let mut data2 : MDB_val = MDB_val {
+            mv_size: 0,
+            mv_data: std::ptr::null_mut()
+        };
+        unsafe {
+            check!(mdb_env_create(&mut env));
+            check!(mdb_env_set_maxdbs(env, 1));
+            std::fs::remove_dir_all("txn_put_get_test.lmdb").ok();
+            std::fs::create_dir("txn_put_get_test.lmdb").unwrap();
+
+            check!(mdb_env_open(env, into_raw(b"txn_put_get_test.lmdb\0"), 0, 0o666));
+            check!(mdb_txn_begin(env, std::ptr::null_mut(), 0, &mut txn));
+            check!(mdb_dbi_open(txn, into_raw(b"test_db\0"), MDB_CREATE, &mut dbi));
+            check!(mdb_put(txn, dbi, &mut key, &mut data, 0));
+            check!(mdb_get(txn, dbi, &mut key, &mut data2));
+            assert!(data.mv_size == data2.mv_size);
+            assert!(data.mv_data != data2.mv_data);
+            assert!(std::slice::from_raw_parts::<u8>(data.mv_data as *const u8, data.mv_size as usize) ==
+                    std::slice::from_raw_parts::<u8>(data2.mv_data as *const u8, data2.mv_size as usize));
+            check!(mdb_txn_commit(txn));
+            mdb_env_close(env);
+        }
+    }
+}
