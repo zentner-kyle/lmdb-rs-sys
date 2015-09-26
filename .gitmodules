@@ -1,0 +1,3 @@
+[submodule "deps/lmdb"]
+	path = deps/lmdb
+	url = git@github.com:LMDB/lmdb.git
